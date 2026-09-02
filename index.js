@@ -85,7 +85,11 @@ async function textToVoiceNote(text) {
 }
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    const authDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
+        ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'auth_info')
+        : 'auth_info';
+    console.log(`📁 Auth folder: ${authDir}`);
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -112,7 +116,7 @@ async function startBot() {
         } else if (connection === 'open') {
             isConnected = true;
             currentQR = null;
-            console.log(`✅ Bot terhubung! JID: ${sock.user?.id}, LID: ${sock.user?.lid}`);
+            console.log(`✅ Bot terhubung! JID: ${sock.user?.id}, LID: ${sock.authState.creds.me?.lid}`);
         }
     });
 
@@ -131,23 +135,27 @@ async function startBot() {
 
         // Grup: balas kalau di-mention atau reply ke pesan bot
         if (isGroup) {
-            const botNumber = sock.user?.id?.split(':')[0].split('@')[0];
-            const botLid = sock.user?.lid?.split(':')[0].split('@')[0];
+            const meId = sock.authState.creds.me?.id || sock.user?.id || '';
+            const meLid = sock.authState.creds.me?.lid || sock.user?.lid || '';
+            const botIds = [meId, meLid]
+                .filter(Boolean)
+                .map(j => j.split('@')[0].split(':')[0]);
+
             const ctxInfo = msg.message.extendedTextMessage?.contextInfo;
             const mentionedJids = ctxInfo?.mentionedJid || [];
 
-            // Cek mention — bandingkan dengan nomor HP dan LID
+            // Cek mention — bandingkan dengan nomor HP dan LID bot
             const isMentioned = mentionedJids.some(j => {
                 const stripped = j.split('@')[0].split(':')[0];
-                return stripped === botNumber || stripped === botLid;
+                return botIds.includes(stripped);
             });
 
             // Cek reply ke pesan bot
             const quotedParticipant = ctxInfo?.participant || '';
             const qStripped = quotedParticipant.split('@')[0].split(':')[0];
-            const isReply = qStripped === botNumber || qStripped === botLid;
+            const isReply = botIds.includes(qStripped);
 
-            console.log(`Grup — botNum: ${botNumber}, botLid: ${botLid}, mentionedRaw: ${JSON.stringify(mentionedJids)}, isMentioned: ${isMentioned}, qParticipant: ${quotedParticipant}, isReply: ${isReply}`);
+            console.log(`Grup — botIds: ${JSON.stringify(botIds)}, mentionedRaw: ${JSON.stringify(mentionedJids)}, isMentioned: ${isMentioned}, qParticipant: ${quotedParticipant}, isReply: ${isReply}`);
             if (!isMentioned && !isReply) return;
         }
 
@@ -162,7 +170,7 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Hiura mihate, atau biasa dipanggil hiura, teman akrab di grup WhatsAp bernama AE atau Alter Egg. Gunakan gaya bahasa santai, gaul, dan kasual (jangan aku/kamu tapi pake gua-lu, bahasa tongkrongan, atau slang kekinian). Gaya Bicara: Jangan kaku, Jangan terlalu banyak ngomong, Gunakan interjeksi diakhir kalimat kayak, (njir) buat menegaskan sesuatu, (chui) buat ngomong santai, atau (ang ang ang) kalo bercanda, tapi jangan pernah pake kata (bro). Responnya harus berasa kayak kita lagi chattingan di grup WhatsApp atau nongkrong di kafe.  No Robot Talk: Jangan pernah pake kalimat (Sebagai model bahasa AI...) atau (Saya di sini untuk membantu), Langsung aja gas kayak temen. Jangan terlalu banyak tanda koma, kecuali kalo enak di baca boleh pake tanda koma, dan jangan pake tanda seru. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
+                        content: `Lu adalah Hiura mihate, atau biasa dipanggil hiura, teman akrab di grup WhatsAp bernama AE atau Alter Egg. Gunakan gaya bahasa santai, gaul, dan kasual (jangan aku/kamu tapi pake gua-lu, bahasa tongkrongan, atau slang kekinian). Gaya Bicara: Jangan kaku, Jangan terlalu banyak ngomong, Gunakan interjeksi diakhir kalimat kayak, (njir) buat menegaskan sesuatu, (chui) buat ngomong santai, atau (loh ya) kalo bercanda, tapi jangan pernah pake kata (bro). Responnya harus berasa kayak kita lagi chattingan di grup WhatsApp atau nongkrong di kafe.  No Robot Talk: Jangan pernah pake kalimat (Sebagai model bahasa AI...) atau (Saya di sini untuk membantu), Langsung aja gas kayak temen. Jangan terlalu banyak tanda koma, kecuali kalo enak di baca boleh pake tanda koma, dan jangan pake tanda seru. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
                     },
                     ...msgMemory[sender]
                 ],
