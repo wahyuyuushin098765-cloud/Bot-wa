@@ -166,7 +166,7 @@ async function startBot() {
                     },
                     ...msgMemory[sender]
                 ],
-                model: "openai/gpt-oss-20b",
+                model: "groq/compound-mini",
                 max_tokens: 100
             });
 
