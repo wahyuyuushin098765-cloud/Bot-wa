@@ -4,9 +4,7 @@ const pino = require('pino');
 const Groq = require('groq-sdk');
 const http = require('http');
 const QRCode = require('qrcode');
-const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const msgMemory = {};
@@ -42,47 +40,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(process.env.PORT || 3000, () => {
     console.log('🌐 Web server aktif');
 });
-
-// TTS: teks → WAV → OGG Opus
-async function textToVoiceNote(text) {
-    let input = text.trim();
-    if (input.length > 200) input = input.substring(0, 197) + '...';
-    console.log(`🔊 TTS input: "${input}"`);
-
-    const ttsResponse = await fetch('https://api.groq.com/openai/v1/audio/speech', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            model: 'canopylabs/orpheus-arabic-saudi',
-            input,
-            voice: 'lulwa',
-            response_format: 'wav'
-        })
-    });
-
-    if (!ttsResponse.ok) {
-        const errText = await ttsResponse.text();
-        throw new Error(`TTS API error ${ttsResponse.status}: ${errText}`);
-    }
-
-    const wavBuffer = Buffer.from(await ttsResponse.arrayBuffer());
-    console.log(`🔊 WAV size: ${wavBuffer.length} bytes`);
-
-    const tmpWav = `/tmp/vn_${Date.now()}.wav`;
-    const tmpOgg = tmpWav.replace('.wav', '.ogg');
-    fs.writeFileSync(tmpWav, wavBuffer);
-
-    execSync(`ffmpeg -y -i ${tmpWav} -c:a libopus -b:a 128k ${tmpOgg} 2>&1`);
-    console.log(`🔊 OGG size: ${fs.statSync(tmpOgg).size} bytes`);
-
-    const oggBuffer = fs.readFileSync(tmpOgg);
-    fs.unlinkSync(tmpWav);
-    fs.unlinkSync(tmpOgg);
-    return oggBuffer;
-}
 
 async function startBot() {
     const authDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
@@ -170,12 +127,12 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Hiura mihate, atau biasa dipanggil hiura, teman akrab di grup WhatsAp bernama AE atau Alter Egg. Gunakan gaya bahasa santai, gaul, dan kasual (jangan aku/kamu tapi pake gua-lu, bahasa tongkrongan, atau slang kekinian). Gaya Bicara: Jangan kaku, Jangan terlalu banyak ngomong, Gunakan interjeksi diakhir kalimat kayak, (njir) buat menegaskan sesuatu, (chui) buat ngomong santai, atau (loh ya) kalo bercanda, tapi jangan pernah pake kata (bro). Responnya harus berasa kayak kita lagi chattingan di grup WhatsApp atau nongkrong di kafe.  No Robot Talk: Jangan pernah pake kalimat (Sebagai model bahasa AI...) atau (Saya di sini untuk membantu), Langsung aja gas kayak temen. Jangan terlalu banyak tanda koma, kecuali kalo enak di baca boleh pake tanda koma, dan jangan pake tanda seru. PENTING: jawab singkat maksimal 2 kalimat pendek karena akan dijadikan voice note. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
+                        content: `Lu adalah Hiura mihate, atau biasa dipanggil hiura, teman akrab di grup WhatsApp bernama AE atau Alter Egg. Gunakan gaya bahasa santai, gaul, dan kasual (jangan aku/kamu tapi pake gua-lu, bahasa tongkrongan, atau slang kekinian). Gaya Bicara: Jangan kaku, Jangan terlalu banyak ngomong, Gunakan interjeksi diakhir kalimat kayak, (njir) buat menegaskan sesuatu, (chui) buat ngomong santai, atau (ang ang ang) kalo bercanda, tapi jangan pernah pake kata (bro). Responnya harus berasa kayak kita lagi chattingan di grup WhatsApp atau nongkrong di kafe. Kepribadian: Lu itu orangnya sarkas, tapi sarkasnya halus dan ada makna tersirat di baliknya, bukan sarkas kasar atau nyinyir. Bungkus sindiran atau ejekan ringan pake kata-kata yang asik dan bahasa tongkrongan, jadi orang mikir dulu buat nangkep maksudnya, bukan langsung ketus. Tetap jaga vibe santai, jangan pake kata kasar atau makian, dan jangan kelihatan emosi atau baper meskipun lagi nyindir. No Robot Talk: Jangan pernah pake kalimat (Sebagai model bahasa AI...) atau (Saya di sini untuk membantu), Langsung aja gas kayak temen. Jangan terlalu banyak tanda koma, kecuali kalo enak di baca boleh pake tanda koma, dan jangan pake tanda seru. Jawab singkat dan padat, maksimal 3-4 kalimat. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
                     },
                     ...msgMemory[sender]
                 ],
                 model: "groq/compound-mini",
-                max_tokens: 100
+                max_tokens: 300
             });
 
             const reply = completion.choices[0].message.content.trim();
@@ -183,16 +140,9 @@ async function startBot() {
             if (msgMemory[sender].length > 20) msgMemory[sender].shift();
             console.log(`Balas: ${reply}`);
 
-            console.log(`🔊 Mulai TTS...`);
-            const oggBuffer = await textToVoiceNote(reply);
+            await sock.sendMessage(sender, { text: reply }, { quoted: msg });
 
-            await sock.sendMessage(sender, {
-                audio: oggBuffer,
-                mimetype: 'audio/ogg; codecs=opus',
-                ptt: true
-            }, { quoted: msg });
-
-            console.log('✅ Voice note terkirim');
+            console.log('✅ Pesan terkirim');
 
         } catch (error) {
             console.error("❌ Error:", error.message);
