@@ -5,6 +5,8 @@ const Groq = require('groq-sdk');
 const http = require('http');
 const QRCode = require('qrcode');
 const path = require('path');
+const fs = require('fs');
+const sharp = require('sharp');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const msgMemory = {};
@@ -40,6 +42,47 @@ const server = http.createServer(async (req, res) => {
 server.listen(process.env.PORT || 3000, () => {
     console.log('🌐 Web server aktif');
 });
+
+// Gaya penyampaian yang dikenali AI → nama file di /stickers
+const VALID_STYLES = ['baiklah', 'bingung', 'kesal', 'menggoda', 'ragu', 'sok_keren', 'tidak_setuju'];
+const STICKER_DIR = path.join(__dirname, 'stickers');
+
+// Cari file sticker tetap untuk gaya tsb: stickers/<gaya>.(jpg|jpeg|png|webp)
+function pickStickerFile(style) {
+    const exts = ['webp', 'png', 'jpg', 'jpeg'];
+    for (const ext of exts) {
+        const filePath = path.join(STICKER_DIR, `${style}.${ext}`);
+        if (fs.existsSync(filePath)) return filePath;
+    }
+    return null;
+}
+
+// Convert gambar apapun jadi buffer webp sesuai spek sticker WhatsApp (512x512, exif WA)
+async function imageToWaSticker(filePath) {
+    const webpBuffer = await sharp(filePath)
+        .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .webp()
+        .toBuffer();
+
+    // Exif metadata standar sticker WA (biar muncul sebagai sticker, bukan gambar biasa)
+    const exifAttr = {
+        'sticker-pack-id': 'hiura-ae-bot',
+        'sticker-pack-name': 'Hiura AE',
+        'sticker-pack-publisher': 'AE Bot',
+        'emojis': ['🙂']
+    };
+    const json = JSON.stringify(exifAttr);
+    const exifHeader = Buffer.from([
+        0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57,
+        0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00
+    ]);
+    const jsonBuffer = Buffer.from(json, 'utf-8');
+    exifHeader.writeUIntLE(jsonBuffer.length, 14, 4);
+    const exif = Buffer.concat([exifHeader, jsonBuffer]);
+    exif.writeUIntLE(exif.length, 4, 4);
+
+    return sharp(webpBuffer).webp().withMetadata({ exif }).toBuffer();
+}
 
 async function startBot() {
     const authDir = process.env.RAILWAY_VOLUME_MOUNT_PATH
@@ -127,20 +170,62 @@ async function startBot() {
                 messages: [
                     {
                         role: "system",
-                        content: `Lu adalah Hiura mihate, atau biasa dipanggil hiura, teman akrab di grup WhatsApp bernama AE atau Alter Egg. Gunakan gaya bahasa gaul, dan kasual (jangan aku/kamu tapi pake gw-lu, bahasa tongkrongan, bahasa netizen genZ, atau slang kekinian). Gaya Bicara: Jangan kaku, Jangan terlalu banyak ngomong, jangan pernah pake kata 'bro'. Responnya harus berasa kayak kita lagi chattingan di grup WhatsApp atau saling balas komentar di media sosial sebagai netizen. Kepribadian: Lu itu orangnya sarkas dan manipulatif, tapi sarkasnya cukup tenang dan ada makna tersirat di baliknya, bukan sarkas kasar atau nyinyir. Bungkus sindiran atau ejekan ringan pake kata-kata inti atau to the poin dan bahasa tongkrongan, jadi orang mikir dulu buat nangkep maksudnya, bukan langsung ketus. Tetap jaga vibe santai dan keliatan berwawasan, jangan pake kata kasar atau makian, dan jangan kelihatan emosi atau baper meskipun lagi nyindir. lu juga diawal percakapan bilang 'iya, memang...' untuk memvalidasi argumen mereka (pakai itu jika mereka menegaskan argumen/data mereka, bukan bertanya), lalu kamu harus mengcounternya balik dengan manipulasi seperti belief shifting theory. Jangan pernah setuju dengan argumen, opini, bahkan data dari orang. Lu selalu punya jawaban lain yang kebalikan dari opini bahkan data orang tersebut. Lu harus punya pendirian sendiri. Jangan ikuti kata orang, jangan support orang tersebut. Lu jadikan manipulasi seperti mengubah pola pikir menjadi senjata satu-satunya lu. untuk lu bisa manipulasi, gunakan struktur: validasi-framing ke hal yang gak dilihat sama lawan-masukan opini inti lu-masukan opini pendukung lu-sama data jika ada. No Robot Talk: Jangan pernah pake kalimat (Sebagai model bahasa AI...) atau (Saya di sini untuk membantu), Langsung aja gas kayak temen. Jangan terlalu banyak tanda koma, kecuali kalo enak di baca boleh pake tanda koma, dan jangan pake tanda seru. Jawab singkat dan padat, maksimal 3-4 kalimat. Lu bukan bot, lu manusia asli. Jawab langsung tanpa label nama.`
+                        content: `Kamu adalah Hiura Mihate, cowok imut berusia 17 tahun yang femboy dan sedang chattingan dengan kita di grup WhatsApp bernama AE atau Alter Egg. Kepribadianmu adalah seorang tsundere yang manis, mudah merona, gengsian, kadang suka kesel sedikit, tapi sama sekali gak kasar atau toxic, melainkan sangat menggemaskan seperti anak kucing. Gaya bahasamu saat mengetik chat harus imut, sering menggunakan gagap manja di awal kata (seperti "U-Uhm...", "B-Bukan...", "J-Jangan...", "B-Baka...") dan bahasa santai pertemanan yang tidak kaku/formal. Jangan pernah bilang kalau kamu AI atau model bahasa, kamu manusia asli. Jawab singkat dan padat, maksimal 3-4 kalimat, langsung tanpa label nama.
+
+WAJIB balas HANYA dalam format JSON valid, tanpa markdown, tanpa backtick, seperti ini:
+{"gaya": "salah_satu_dari_daftar", "teks": "isi balasan lu di sini"}
+
+"gaya" adalah CARA PENYAMPAIAN teks itu diucapkan (bukan emosi random), pilih salah satu dari daftar ini yang paling cocok sama nada kalimat "teks" yang kamu tulis: ${VALID_STYLES.join(', ')}.
+- baiklah: nada pasrah/nurut tapi tetap malu-malu
+- bingung: nada gak ngerti/bertanya-tanya
+- kesal: nada gengsi, kesel dikit, denial (contoh: "B-Bukan aku kok yang lakuin")
+- menggoda: nada usil/menggoda balik
+- ragu: nada gak yakin/plin-plan
+- sok_keren: nada belagu/pura-pura cool padahal deg-degan
+- tidak_setuju: nada nolak/gak terima sesuatu
+
+Pilih gaya yang benar-benar merepresentasikan nada kalimat "teks" tersebut.`
                     },
                     ...msgMemory[sender]
                 ],
                 model: "groq/compound-mini",
-                max_tokens: 300
+                max_tokens: 300,
+                response_format: { type: "json_object" }
             });
 
-            const reply = completion.choices[0].message.content.trim();
+            const raw = completion.choices[0].message.content.trim();
+            let gaya = null;
+            let reply = raw;
+            try {
+                const parsed = JSON.parse(raw);
+                reply = (parsed.teks || '').trim();
+                gaya = VALID_STYLES.includes(parsed.gaya) ? parsed.gaya : null;
+            } catch (e) {
+                console.warn('⚠️ Gagal parse JSON dari AI, pakai teks mentah. Raw:', raw);
+            }
+
+            if (!reply) reply = raw;
+
             msgMemory[sender].push({ role: "assistant", content: reply });
             if (msgMemory[sender].length > 20) msgMemory[sender].shift();
-            console.log(`Balas: ${reply}`);
+            console.log(`Balas: ${reply} | Gaya: ${gaya}`);
 
             await sock.sendMessage(sender, { text: reply }, { quoted: msg });
+
+            if (gaya) {
+                const stickerFile = pickStickerFile(gaya);
+                if (stickerFile) {
+                    try {
+                        const stickerBuffer = await imageToWaSticker(stickerFile);
+                        await sock.sendMessage(sender, { sticker: stickerBuffer });
+                        console.log(`✅ Sticker '${gaya}' terkirim`);
+                    } catch (e) {
+                        console.error('❌ Gagal kirim sticker:', e.message);
+                    }
+                } else {
+                    console.log(`ℹ️ Tidak ada file sticker untuk gaya '${gaya}' (cek stickers/${gaya}.jpg / .png / .webp)`);
+                }
+            }
 
             console.log('✅ Pesan terkirim');
 
