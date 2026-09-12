@@ -6,7 +6,7 @@ const http = require('http');
 const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
-const sharp = require('sharp');
+const { Sticker, StickerTypes } = require('wa-sticker-formatter');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const msgMemory = {};
@@ -57,31 +57,15 @@ function pickStickerFile(style) {
     return null;
 }
 
-// Convert gambar apapun jadi buffer webp sesuai spek sticker WhatsApp (512x512, exif WA)
+// Convert gambar apapun jadi buffer webp sticker WhatsApp yang valid
 async function imageToWaSticker(filePath) {
-    const webpBuffer = await sharp(filePath)
-        .resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-        .webp()
-        .toBuffer();
-
-    // Exif metadata standar sticker WA (biar muncul sebagai sticker, bukan gambar biasa)
-    const exifAttr = {
-        'sticker-pack-id': 'hiura-ae-bot',
-        'sticker-pack-name': 'Hiura AE',
-        'sticker-pack-publisher': 'AE Bot',
-        'emojis': ['🙂']
-    };
-    const json = JSON.stringify(exifAttr);
-    const exifHeader = Buffer.from([
-        0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57,
-        0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00
-    ]);
-    const jsonBuffer = Buffer.from(json, 'utf-8');
-    exifHeader.writeUIntLE(jsonBuffer.length, 14, 4);
-    const exif = Buffer.concat([exifHeader, jsonBuffer]);
-    exif.writeUIntLE(exif.length, 4, 4);
-
-    return sharp(webpBuffer).webp().withMetadata({ exif }).toBuffer();
+    const sticker = new Sticker(filePath, {
+        pack: 'Hiura AE',
+        author: 'AE Bot',
+        type: StickerTypes.FULL,
+        quality: 70
+    });
+    return sticker.toBuffer();
 }
 
 async function startBot() {
